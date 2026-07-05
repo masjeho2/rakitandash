@@ -318,3 +318,49 @@ canvas {
   cursor: not-allowed;
   transform: none;
 }
+
+/* SMS Styles */
+.sms-item {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.sms-item.unread {
+  border-left: 3px solid var(--green);
+}
+
+.sms-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.sms-sender {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 10px;
+  color: var(--cyan);
+}
+
+.sms-time {
+  font-size: 14px;
+  color: var(--text2);
+}
+
+.sms-body {
+  font-size: 16px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.sms-status {
+  font-size: 12px;
+  color: var(--green);
+  margin-top: 4px;
+}
+
+.sms-status.read { color: var(--text2); }

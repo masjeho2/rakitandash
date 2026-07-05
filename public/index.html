@@ -161,6 +161,19 @@
       <div id="ctrl-status" style="margin-top:10px;font-size:14px;color:var(--text2)"></div>
     </div>
 
+    <!-- SMS INBOX -->
+    <div class="card cyan" id="card-sms" style="grid-column: 1 / -1;">
+      <div class="card-title">💬 SMS INBOX</div>
+      <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="ctrl-btn ctrl-green" onclick="refreshSMS()" id="btn-sms-refresh">📥 REFRESH</button>
+        <button class="ctrl-btn ctrl-red" onclick="deleteAllSMS()" id="btn-sms-deleteall">🗑️ DELETE ALL</button>
+      </div>
+      <div id="sms-storage-info" style="font-size:14px;color:var(--text2);margin-bottom:8px"></div>
+      <div id="sms-list" style="max-height:300px;overflow-y:auto">
+        <div style="color:var(--text2);padding:8px 0">No SMS messages</div>
+      </div>
+    </div>
+
     <!-- SIGNAL HISTORY -->
     <div class="card green" id="card-history" style="grid-column: 1 / -1;">
       <div class="card-title">📈 SIGNAL HISTORY</div>

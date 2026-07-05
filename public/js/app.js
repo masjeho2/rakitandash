@@ -300,10 +300,79 @@ async function enableModem() {
   btn.textContent = '▶️ ENABLE';
 }
 
+// === SMS FUNCTIONS ===
+async function refreshSMS() {
+  const btn = document.getElementById('btn-sms-refresh');
+  btn.disabled = true;
+  btn.textContent = '⏳ LOADING...';
+  
+  try {
+    // Get storage info
+    const storageRes = await fetch('/api/sms/storage');
+    const storage = await storageRes.json();
+    document.getElementById('sms-storage-info').textContent = 
+      storage.used !== undefined ? `Storage: ${storage.used}/${storage.total} messages` : 'Storage: --';
+
+    // Get all SMS
+    const smsRes = await fetch('/api/sms');
+    const smsList = await smsRes.json();
+    
+    const container = document.getElementById('sms-list');
+    if (smsList.length === 0) {
+      container.innerHTML = '<div style="color:var(--text2);padding:8px 0">No SMS messages</div>';
+    } else {
+      container.innerHTML = smsList.map(sms => `
+        <div class="sms-item ${sms.status.includes('UNREAD') ? 'unread' : ''}">
+          <div class="sms-header">
+            <span class="sms-sender">📱 ${sms.sender}</span>
+            <span class="sms-time">${sms.timestamp || '--'}</span>
+          </div>
+          <div class="sms-body">${sms.body}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span class="sms-status ${sms.status.includes('READ') ? 'read' : ''}">${sms.status}</span>
+            <button class="ctrl-btn ctrl-red" style="font-size:8px;padding:4px 8px" onclick="deleteSMS(${sms.index})">🗑️</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    addLog(`SMS: ${smsList.length} messages loaded`, 'ok');
+  } catch (err) {
+    addLog('SMS refresh error: ' + err.message, 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '📥 REFRESH';
+}
+
+async function deleteSMS(index) {
+  if (!confirm('Hapus SMS ini?')) return;
+  try {
+    await fetch('/api/sms/' + index, { method: 'DELETE' });
+    addLog('SMS #' + index + ' deleted', 'ok');
+    refreshSMS();
+  } catch (err) {
+    addLog('Delete error: ' + err.message, 'err');
+  }
+}
+
+async function deleteAllSMS() {
+  if (!confirm('🗑️ Hapus SEMUA SMS?')) return;
+  try {
+    await fetch('/api/sms', { method: 'DELETE' });
+    addLog('All SMS deleted', 'ok');
+    refreshSMS();
+  } catch (err) {
+    addLog('Delete all error: ' + err.message, 'err');
+  }
+}
+
+// Auto-refresh SMS every 30 seconds
+setInterval(refreshSMS, 30000);
+
 // Init
 document.addEventListener('DOMContentLoaded', () => {
   addLog('RakitanDash v1.0 initialized');
   fetchDashboard();
+  refreshSMS();
   setInterval(fetchDashboard, REFRESH_INTERVAL);
 
   // Resize chart on window resize

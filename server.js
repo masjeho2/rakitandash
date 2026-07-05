@@ -143,6 +143,46 @@ app.get('/api/modem/ca/info', async (req, res) => {
   res.json(result || { error: 'No CA info' });
 });
 
+// === SMS ROUTES ===
+
+// GET /api/sms — read all SMS
+app.get('/api/sms', async (req, res) => {
+  const sms = await modem.readSMS();
+  res.json(sms);
+});
+
+// GET /api/sms/unread — read unread SMS only
+app.get('/api/sms/unread', async (req, res) => {
+  const sms = await modem.readUnreadSMS();
+  res.json(sms);
+});
+
+// POST /api/sms/send — send SMS
+app.post('/api/sms/send', async (req, res) => {
+  const { number, message } = req.body;
+  if (!number || !message) return res.json({ success: false, error: 'Number and message required' });
+  const result = await modem.sendSMS(number, message);
+  res.json(result);
+});
+
+// DELETE /api/sms/:index — delete SMS by index
+app.delete('/api/sms/:index', async (req, res) => {
+  const result = await modem.deleteSMS(parseInt(req.params.index));
+  res.json(result);
+});
+
+// DELETE /api/sms — delete all SMS
+app.delete('/api/sms', async (req, res) => {
+  const result = await modem.deleteAllSMS();
+  res.json(result);
+});
+
+// GET /api/sms/storage — SMS storage info
+app.get('/api/sms/storage', async (req, res) => {
+  const storage = await modem.getSMSStorage();
+  res.json(storage || { error: 'No storage info' });
+});
+
 // GET /api/settings
 app.get('/api/settings', (req, res) => {
   const rows = db.prepare('SELECT * FROM settings').all();
@@ -178,7 +218,7 @@ app.listen(PORT, HOST, async () => {
 
   // Auto-detect modem serial port
   const port = await modem.detectModem();
-  if (port) {
+  if (port !== null) {
     console.log(`[RAKITANDASH] Modem detected: ${port}`);
   } else {
     console.log('[RAKITANDASH] No modem serial port found (/dev/ttyUSB*)');

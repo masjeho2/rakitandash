@@ -28,15 +28,16 @@ class ModemClient {
   }
 
   async detectSerialPort() {
-    if (!this.modemIndex) return null;
+    if (this.modemIndex === null) return null;
     const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
     const portsMatch = raw?.match(/ports:\s*(.+)/);
     if (portsMatch) {
       const ports = portsMatch[1].split(',').map(p => p.trim());
       const atPort = ports.find(p => p.includes('ttyUSB') && p.includes('at'));
       if (atPort) {
-        const portName = atPort.match(/\/dev\/\w+/)?.[0];
-        if (portName) { this.serialPort = portName; return this.serialPort; }
+        // Extract port name: "ttyUSB1 (at)" -> "/dev/ttyUSB1"
+        const portName = atPort.match(/ttyUSB\d+/)?.[0];
+        if (portName) { this.serialPort = `/dev/${portName}`; return this.serialPort; }
       }
     }
     for (const p of ['/dev/ttyUSB0', '/dev/ttyUSB1']) {
@@ -47,8 +48,8 @@ class ModemClient {
   }
 
   async sendAT(command) {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return 'NO_MODEM';
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return 'NO_MODEM';
     if (!this.serialPort) await this.detectSerialPort();
     if (!this.serialPort) return 'NO_SERIAL';
 
@@ -100,8 +101,8 @@ class ModemClient {
   // === MODEM COMMANDS ===
 
   async reboot() {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return { success: false, error: 'Modem not detected' };
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return { success: false, error: 'Modem not detected' };
     console.log(`[MODEM] Rebooting modem index ${this.modemIndex}...`);
     await this.run(`mmcli -m ${this.modemIndex} --disable 2>/dev/null`);
     await this.run('sleep 1.5');
@@ -114,7 +115,7 @@ class ModemClient {
     await this.run('sleep 25');
     this.modemIndex = null; this.serialPort = null;
     await this.detectModem();
-    if (!this.modemIndex) { await this.run('sleep 15'); await this.detectModem(); }
+    if (this.modemIndex === null) { await this.run('sleep 15'); await this.detectModem(); }
     if (this.modemIndex) {
       await this.run(`mmcli -m ${this.modemIndex} --enable 2>/dev/null`);
       await this.run('sleep 5');
@@ -125,15 +126,15 @@ class ModemClient {
   }
 
   async disableRadio() {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return { success: false, error: 'No modem' };
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return { success: false, error: 'No modem' };
     const r = await this.run(`mmcli -m ${this.modemIndex} --disable 2>&1`);
     return { success: r?.includes('success'), message: r || 'OK' };
   }
 
   async enableRadio() {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return { success: false, error: 'No modem' };
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return { success: false, error: 'No modem' };
     const r = await this.run(`mmcli -m ${this.modemIndex} --enable 2>&1`);
     return { success: r?.includes('success'), message: r || 'OK' };
   }
@@ -159,8 +160,8 @@ class ModemClient {
   // === GETTERS ===
 
   async getSignalFromMM() {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return null;
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return null;
     const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
     if (!raw) return null;
     const info = {};
@@ -171,8 +172,8 @@ class ModemClient {
   }
 
   async getDeviceInfo() {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return null;
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return null;
     const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
     if (!raw) return null;
     const info = {};
@@ -184,8 +185,8 @@ class ModemClient {
   }
 
   async getNetworkInfo() {
-    if (!this.modemIndex) await this.detectModem();
-    if (!this.modemIndex) return null;
+    if (this.modemIndex === null) await this.detectModem();
+    if (this.modemIndex === null) return null;
     const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
     if (!raw) return null;
     const info = {};
@@ -205,8 +206,100 @@ class ModemClient {
     return { wan_ip: wanIp, gateway, dns };
   }
 
+  // === SMS METHODS ===
+
+  // Read all SMS
+  async readSMS() {
+    const raw = await this.sendAT('AT+CMGL="ALL"');
+    if (!raw || raw.includes('ERROR') || raw.includes('NO_')) return [];
+
+    const smsList = [];
+    const lines = raw.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const headerMatch = lines[i].match(/\+CMGL:\s*(\d+),"([^"]*)","([^"]*)",?,"?([^"]*)"?.*/);
+      if (headerMatch) {
+        const body = lines[i + 1]?.trim() || '';
+        smsList.push({
+          index: parseInt(headerMatch[1]),
+          status: headerMatch[2],     // REC UNREAD, REC READ, etc
+          sender: headerMatch[3],     // phone number
+          timestamp: headerMatch[4],  // date/time
+          body: body,
+        });
+      }
+    }
+    return smsList;
+  }
+
+  // Read only unread SMS
+  async readUnreadSMS() {
+    const raw = await this.sendAT('AT+CMGL="REC UNREAD"');
+    if (!raw || raw.includes('ERROR') || raw.includes('NO_')) return [];
+
+    const smsList = [];
+    const lines = raw.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const headerMatch = lines[i].match(/\+CMGL:\s*(\d+),"([^"]*)","([^"]*)",?,"?([^"]*)"?.*/);
+      if (headerMatch) {
+        const body = lines[i + 1]?.trim() || '';
+        smsList.push({
+          index: parseInt(headerMatch[1]),
+          status: headerMatch[2],
+          sender: headerMatch[3],
+          timestamp: headerMatch[4],
+          body: body,
+        });
+      }
+    }
+    return smsList;
+  }
+
+  // Send SMS
+  async sendSMS(number, message) {
+    // Set text mode
+    await this.sendAT('AT+CMGF=1');
+
+    // Send SMS via AT+CMGS
+    const atPort = this.serialPort || '/dev/ttyUSB1';
+    await this.run(`mmcli -m ${this.modemIndex} --disable 2>/dev/null`);
+    await this.run('sleep 1.5');
+
+    // AT+CMGS needs special handling (Ctrl+Z to send)
+    const cmd = `(echo -e "AT+CMGS=\\"${number}\\"\\r"; sleep 0.5; echo -e "${message}\\x1a"; sleep 5) | timeout 10 socat - ${atPort},raw,echo=0,b115200 2>/dev/null`;
+    const result = await this.run(cmd, 15000);
+
+    await this.run(`mmcli -m ${this.modemIndex} --enable 2>/dev/null`);
+    await this.run('sleep 3');
+
+    return { success: result?.includes('+CMGS'), message: result || 'No response' };
+  }
+
+  // Delete SMS by index
+  async deleteSMS(index) {
+    const result = await this.sendAT(`AT+CMGD=${index}`);
+    return { success: result?.includes('OK'), message: result };
+  }
+
+  // Delete all SMS
+  async deleteAllSMS() {
+    const result = await this.sendAT('AT+CMGD=1,4');
+    return { success: result?.includes('OK'), message: result };
+  }
+
+  // Get SMS storage info
+  async getSMSStorage() {
+    const raw = await this.sendAT('AT+CPMS?');
+    if (!raw) return null;
+    const match = raw.match(/\+CPMS:\s*"(\w+)",(\d+),(\d+)/);
+    if (match) {
+      return { storage: match[1], used: parseInt(match[2]), total: parseInt(match[3]) };
+    }
+    return null;
+  }
+
+  // Get dashboard data
   async getDashboardData() {
-    if (!this.modemIndex) await this.detectModem();
+    if (this.modemIndex === null) await this.detectModem();
     const [modemInfo, signal, network, bearer] = await Promise.all([
       this.getDeviceInfo(), this.getSignalFromMM(), this.getNetworkInfo(), this.getBearer()
     ]);
