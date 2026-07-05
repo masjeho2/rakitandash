@@ -1,160 +1,227 @@
-const axios = require('axios');
-const { parseStringPromise } = require('xml2js');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 
 class ModemClient {
   constructor() {
-    this.base = `http://${process.env.MODEM_IP || '192.168.8.1'}:${process.env.MODEM_PORT || '80'}`;
-    this.sessionId = null;
+    this.modemIndex = null;
+    this.serialPort = null;
   }
 
-  // Huawei HiLink API — POST with XML body
-  async apiRequest(path, body = {}) {
+  async run(cmd, timeout = 8000) {
     try {
-      const params = new URLSearchParams();
-      params.append('isTest', 'false');
-      for (const [k, v] of Object.entries(body)) {
-        params.append(k, v);
-      }
-      if (this.sessionId) {
-        params.append('SessionID', this.sessionId);
-      }
-
-      const res = await axios.post(`${this.base}${path}`, params.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 5000,
-      });
-
-      // Parse XML response
-      const parsed = await parseStringPromise(res.data, { explicitArray: false });
-      return parsed;
-    } catch (err) {
-      console.error(`[MODEM] API error at ${path}:`, err.message);
-      return null;
-    }
+      const { stdout } = await execAsync(cmd, { timeout });
+      return stdout.trim().replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+    } catch (err) { return null; }
   }
 
-  // GET XML endpoint
-  async apiGet(path) {
+  async detectModem() {
+    const list = await this.run('mmcli -L 2>/dev/null');
+    if (!list) return null;
+    const match = list.match(/Modem\/(\d+)/);
+    if (match) {
+      this.modemIndex = parseInt(match[1]);
+      await this.detectSerialPort();
+      return this.modemIndex;
+    }
+    return null;
+  }
+
+  async detectSerialPort() {
+    if (!this.modemIndex) return null;
+    const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
+    const portsMatch = raw?.match(/ports:\s*(.+)/);
+    if (portsMatch) {
+      const ports = portsMatch[1].split(',').map(p => p.trim());
+      const atPort = ports.find(p => p.includes('ttyUSB') && p.includes('at'));
+      if (atPort) {
+        const portName = atPort.match(/\/dev\/\w+/)?.[0];
+        if (portName) { this.serialPort = portName; return this.serialPort; }
+      }
+    }
+    for (const p of ['/dev/ttyUSB0', '/dev/ttyUSB1']) {
+      const exists = await this.run(`test -e ${p} && echo yes`);
+      if (exists === 'yes') { this.serialPort = p; return this.serialPort; }
+    }
+    return null;
+  }
+
+  async sendAT(command) {
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return 'NO_MODEM';
+    if (!this.serialPort) await this.detectSerialPort();
+    if (!this.serialPort) return 'NO_SERIAL';
+
+    while (this._atBusy) await this.run('sleep 1');
+    this._atBusy = true;
     try {
-      const res = await axios.get(`${this.base}${path}`, { timeout: 5000 });
-      const parsed = await parseStringPromise(res.data, { explicitArray: false });
-      return parsed;
-    } catch (err) {
-      console.error(`[MODEM] GET error at ${path}:`, err.message);
-      return null;
-    }
+      await this.run(`mmcli -m ${this.modemIndex} --disable 2>/dev/null`);
+      await this.run('sleep 1.5');
+      const result = await this.run(
+        `echo -e "${command}\\r" | timeout 5 socat - ${this.serialPort},raw,echo=0,b115200 2>/dev/null`, 10000
+      );
+      await this.run(`mmcli -m ${this.modemIndex} --enable 2>/dev/null`);
+      await this.run('sleep 3');
+      return result || 'NO_RESPONSE';
+    } finally { this._atBusy = false; }
   }
 
-  // Login to modem
-  async login(username, password) {
-    const data = await this.apiRequest('/api/user/login', {
-      Username: username || process.env.MODEM_USER,
-      Password: password || process.env.MODEM_PASS,
-    });
-    if (data?.response?.SessionID) {
-      this.sessionId = data.response.SessionID;
-      console.log(`[MODEM] Login OK, session: ${this.sessionId}`);
-      return true;
-    }
-    console.log('[MODEM] Login failed, trying no-auth...');
-    return false;
-  }
-
-  // Get signal info
-  async getSignalInfo() {
-    const data = await this.apiRequest('/api/device/signal');
-    if (!data?.response) return null;
-    const r = data.response;
-    return {
-      rssi: parseInt(r.RSSI) || 0,
-      rsrp: parseInt(r.RSRP) || 0,
-      rsrq: parseInt(r.RSRQ) || 0,
-      sinr: parseFloat(r.SINR) || 0,
-      cell_id: r.CellID || '0',
-      pci: r.PCID || '0',
-      band: r.EARFCN || '0',
-      rscp: r.RSCP || '0',
-      ecio: r.EcIo || '0',
+  parseDebugInfo(raw) {
+    if (!raw || ['NO_MODEM','NO_RESPONSE','NO_SERIAL'].includes(raw)) return null;
+    const info = {};
+    const p = {
+      band: /BAND:\s*(\d+)/, bandwidth: /BW:\s*([\d.]+)\s*MHz/,
+      plmn: /PLMN:\s*(.+)/, tac: /TAC:\s*(\d+)/,
+      enb_id: /eNB ID\(PCI\):\s*(\S+)/,
+      rsrp: /RSRP:\s*(-?[\d.]+)dBm/, rsrq: /RSRQ:\s*(-?[\d.]+)dB/,
+      rssi: /RSSI:\s*(-?[\d.]+)dBm/, sinr: /RS-SINR:\s*(-?[\d.]+)dB/,
+      cqi: /CQI:\s*(\d+)/, ri: /RI:\s*(\d+)/,
+      status: /STATUS:\s*(\S+)/, sub_status: /SUB STATUS:\s*(.+)/,
+      rrc: /RRC Status:\s*(\S+)/, ip: /IP:\s*(\S+)/,
+      avg_rsrp: /AVG RSRP:\s*(-?[\d.]+)dBm/,
     };
+    for (const [k, r] of Object.entries(p)) { const m = raw.match(r); if (m) info[k] = m[1]; }
+    const pciMatch = raw.match(/\((\d+)\)/); if (pciMatch) info.pci = pciMatch[1];
+    return Object.keys(info).length > 0 ? info : null;
   }
 
-  // Get device info
+  parseCAInfo(raw) {
+    if (!raw || ['NO_MODEM','NO_RESPONSE','NO_SERIAL'].includes(raw)) return null;
+    // AT^CA_INFO? returns enabled bands + CA status
+    const info = { raw, enabled: raw.includes('ENABLED') || raw.includes('1'), bands: [] };
+    const bandMatch = raw.match(/BANDS?:\s*(.+)/i);
+    if (bandMatch) info.bands = bandMatch[1].split(/[,\s]+/).filter(Boolean);
+    // Check if CA is active
+    const caMatch = raw.match(/CA[_\s]*STATUS:\s*(\S+)/i);
+    if (caMatch) info.ca_status = caMatch[1];
+    return info;
+  }
+
+  // === MODEM COMMANDS ===
+
+  async reboot() {
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return { success: false, error: 'Modem not detected' };
+    console.log(`[MODEM] Rebooting modem index ${this.modemIndex}...`);
+    await this.run(`mmcli -m ${this.modemIndex} --disable 2>/dev/null`);
+    await this.run('sleep 1.5');
+    const atPort = this.serialPort || '/dev/ttyUSB0';
+    const result = await this.run(
+      `echo -e "AT+CFUN=1,1\\r" | timeout 3 socat - ${atPort},raw,echo=0,b115200 2>/dev/null`, 8000
+    );
+    console.log(`[MODEM] AT: ${result}`);
+    console.log('[MODEM] Waiting 25s for reboot...');
+    await this.run('sleep 25');
+    this.modemIndex = null; this.serialPort = null;
+    await this.detectModem();
+    if (!this.modemIndex) { await this.run('sleep 15'); await this.detectModem(); }
+    if (this.modemIndex) {
+      await this.run(`mmcli -m ${this.modemIndex} --enable 2>/dev/null`);
+      await this.run('sleep 5');
+      this._debugCache = null; this._debugCacheTime = 0;
+      return { success: true, message: `Reboot OK, modem index: ${this.modemIndex}` };
+    }
+    return { success: false, error: 'Modem did not come back' };
+  }
+
+  async disableRadio() {
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return { success: false, error: 'No modem' };
+    const r = await this.run(`mmcli -m ${this.modemIndex} --disable 2>&1`);
+    return { success: r?.includes('success'), message: r || 'OK' };
+  }
+
+  async enableRadio() {
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return { success: false, error: 'No modem' };
+    const r = await this.run(`mmcli -m ${this.modemIndex} --enable 2>&1`);
+    return { success: r?.includes('success'), message: r || 'OK' };
+  }
+
+  // Enable Carrier Aggregation (AT^CA_ENABLE=0 = ON, 1 = OFF)
+  async enableCA() {
+    const result = await this.sendAT('AT^CA_ENABLE=0');
+    return { success: !result?.includes('ERROR'), message: 'CA Enabled', at_response: result };
+  }
+
+  // Disable Carrier Aggregation
+  async disableCA() {
+    const result = await this.sendAT('AT^CA_ENABLE=1');
+    return { success: !result?.includes('ERROR'), message: 'CA Disabled', at_response: result };
+  }
+
+  // Get CA info
+  async getCAInfo() {
+    const raw = await this.sendAT('AT^CA_INFO?');
+    return this.parseCAInfo(raw);
+  }
+
+  // === GETTERS ===
+
+  async getSignalFromMM() {
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return null;
+    const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
+    if (!raw) return null;
+    const info = {};
+    for (const l of raw.split('\n')) { const m = l.match(/\|\s+([\w\s\/()-]+)\s*:\s+(.+)/); if (m) info[m[1].trim()] = m[2].trim(); }
+    const sq = parseInt(info['signal quality']) || 0;
+    return { signal_quality: sq, csq: Math.round(sq * 31 / 100), rat: info['access tech'] || 'unknown',
+      quality: sq >= 80 ? 'Excellent' : sq >= 60 ? 'Good' : sq >= 40 ? 'Fair' : sq >= 20 ? 'Weak' : 'Poor' };
+  }
+
   async getDeviceInfo() {
-    const data = await this.apiRequest('/api/device/information');
-    if (!data?.response) return null;
-    const r = data.response;
-    return {
-      device_name: r.DeviceName || 'Unknown',
-      imei: r.IMEI || 'Unknown',
-      mac: r.MACAddress || 'Unknown',
-      ip: r.WanIPAddress || 'Unknown',
-      software_version: r.SoftwareVersion || 'Unknown',
-      hardware_version: r.HardwareVersion || 'Unknown',
-      web_version: r.WebUIVersion || 'Unknown',
-    };
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return null;
+    const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
+    if (!raw) return null;
+    const info = {};
+    for (const l of raw.split('\n')) { const m = l.match(/\|\s+([\w\s\/()-]+)\s*:\s+(.+)/); if (m) info[m[1].trim()] = m[2].trim(); }
+    return { manufacturer: info['manufacturer'] || 'Dell', model: info['model'] || 'DW5821e',
+      firmware: info['firmware revision'] || 'Unknown', imei: info['equipment id'] || 'Unknown',
+      state: info['state'] || 'unknown', power_state: info['power state'] || 'unknown',
+      signal_quality: info['signal quality'] || '0%', access_tech: info['access tech'] || 'unknown' };
   }
 
-  // Get network info
   async getNetworkInfo() {
-    const data = await this.apiRequest('/api/net/current-plmn');
-    if (!data?.response) return null;
-    const r = data.response;
-    return {
-      operator: r.OperatorName || 'Unknown',
-      numeric: r.Numeric || '0',
-      rat: r.RAT || 'Unknown',
-      domain: r.Domain || 'Unknown',
-    };
+    if (!this.modemIndex) await this.detectModem();
+    if (!this.modemIndex) return null;
+    const raw = await this.run(`mmcli -m ${this.modemIndex} 2>/dev/null`);
+    if (!raw) return null;
+    const info = {};
+    for (const l of raw.split('\n')) { const m = l.match(/\|\s+([\w\s\/()-]+)\s*:\s+(.+)/); if (m) info[m[1].trim()] = m[2].trim(); }
+    return { operator: info['operator name'] || 'Unknown', operator_id: info['operator id'] || '0',
+      registration: info['registration'] || 'unknown', cell_id: info['cell id'] || '0',
+      apn: info['initial bearer apn'] || 'internet' };
   }
 
-  // Get data usage
-  async getDataUsage() {
-    const data = await this.apiRequest('/api/monitoring/traffic-statistics');
-    if (!data?.response) return null;
-    const r = data.response;
-    return {
-      current_rx: parseInt(r.CurrentDownload) || 0,
-      current_tx: parseInt(r.CurrentUpload) || 0,
-      total_rx: parseInt(r.TotalDownload) || 0,
-      total_tx: parseInt(r.TotalUpload) || 0,
-      total_duration: parseInt(r.TotalConnectTime) || 0,
-    };
+  async getBearer() {
+    const ipRaw = await this.run('ip addr show wwan0 2>/dev/null | grep "inet "');
+    const wanIp = ipRaw?.match(/inet\s+(\S+)/)?.[1]?.split('/')[0] || '--';
+    const gwRaw = await this.run('ip route show default dev wwan0 2>/dev/null');
+    const gateway = gwRaw?.match(/via\s+(\S+)/)?.[1] || '--';
+    const dnsRaw = await this.run('resolvectl status wwan0 2>/dev/null | grep -A1 "DNS Servers"');
+    const dns = dnsRaw?.replace('DNS Servers:', '').trim() || '--';
+    return { wan_ip: wanIp, gateway, dns };
   }
 
-  // Get connection status
-  async getConnectionStatus() {
-    const data = await this.apiRequest('/api/monitoring/status');
-    if (!data?.response) return null;
-    const r = data.response;
-    return {
-      connection_status: parseInt(r.ConnectionStatus) || 0,
-      signal_strength: parseInt(r.SignalStrength) || 0,
-      network_type: r.CurrentNetworkType || 'Unknown',
-      wifi_status: parseInt(r.WifiStatus) || 0,
-      wan_ip: r.WanIPAddress || '0.0.0.0',
-      primary_dns: r.PrimaryDns || '0.0.0.0',
-      secondary_dns: r.SecondaryDns || '0.0.0.0',
-    };
-  }
-
-  // Get all data at once (dashboard summary)
   async getDashboardData() {
-    const [signal, device, network, dataUsage, status] = await Promise.all([
-      this.getSignalInfo(),
-      this.getDeviceInfo(),
-      this.getNetworkInfo(),
-      this.getDataUsage(),
-      this.getConnectionStatus(),
+    if (!this.modemIndex) await this.detectModem();
+    const [modemInfo, signal, network, bearer] = await Promise.all([
+      this.getDeviceInfo(), this.getSignalFromMM(), this.getNetworkInfo(), this.getBearer()
     ]);
-
-    return {
-      signal,
-      device,
-      network,
-      data_usage: dataUsage,
-      connection: status,
-      timestamp: new Date().toISOString(),
-    };
+    let debugInfo = this._debugCache || null;
+    const now = Date.now();
+    if (!this._debugCache || (now - this._debugCacheTime) > 15000) {
+      try {
+        const raw = await this.sendAT('AT^DEBUG?');
+        debugInfo = this.parseDebugInfo(raw);
+        if (debugInfo) { this._debugCache = debugInfo; this._debugCacheTime = now; }
+      } catch (e) { console.log('[MODEM] AT^DEBUG? failed:', e.message); }
+    }
+    return { modem: modemInfo, signal, network, bearer, debug: debugInfo,
+      modem_type: 'DW5821e (Qualcomm Snapdragon X20)',
+      interface: 'MBIM + AT via ModemManager', timestamp: new Date().toISOString() };
   }
 }
 

@@ -1,5 +1,5 @@
 /* RakitanDash — Frontend JS */
-const REFRESH_INTERVAL = 5000;
+const REFRESH_INTERVAL = 8000;
 let signalHistory = [];
 let prevRx = 0, prevTx = 0;
 
@@ -151,71 +151,153 @@ async function fetchDashboard() {
     document.getElementById('status-dot').className = 'status-dot online';
 
     // Signal
-    if (data.signal) {
-      const s = data.signal;
-      document.getElementById('rsrp-val').textContent = s.rsrp;
-      document.getElementById('rssi-val').textContent = s.rssi + ' dBm';
-      document.getElementById('rsrq-val').textContent = s.rsrq + ' dB';
-      document.getElementById('sinr-val').textContent = s.sinr + ' dB';
-      document.getElementById('pci-val').textContent = s.pci;
-      document.getElementById('band-val').textContent = 'Band ' + s.band;
-      updateSignalBars(s.rsrp);
+    const dbg = data.debug || {};
+    const sig = data.signal || {};
+    const rat = sig.rat ? sig.rat.toUpperCase() : 'LTE';
 
-      // Add to history
-      signalHistory.push({ rsrp: s.rsrp, rssi: s.rssi, sinr: s.sinr, time: new Date() });
-      if (signalHistory.length > 120) signalHistory.shift();
-      drawSignalChart();
-    }
+    // Use AT^DEBUG? data (real RSRP/RSRQ/SINR) — fallback to MM signal quality
+    document.getElementById('rsrp-val').textContent = dbg.rsrp || sig.signal_quality + '%' || '--';
+    document.getElementById('rssi-val').textContent = dbg.rssi || (sig.csq ? sig.csq + ' (' + sig.quality + ')' : '--');
+    document.getElementById('rsrq-val').textContent = dbg.rsrq || '--';
+    document.getElementById('sinr-val').textContent = dbg.sinr || '--';
+    document.getElementById('pci-val').textContent = dbg.pci || data.network?.cell_id || '--';
+    document.getElementById('band-val').textContent = dbg.band ? 'Band ' + dbg.band : rat;
+
+    // Update signal bars from RSRP if available
+    const rsrpVal = dbg.rsrp ? parseFloat(dbg.rsrp) : null;
+    updateSignalBars(rsrpVal || sig.csq || 0);
+
+    // Add to history
+    signalHistory.push({
+      rsrp: rsrpVal || sig.signal_quality || 0,
+      rssi: dbg.rssi ? parseFloat(dbg.rssi) : sig.csq || 0,
+      sinr: dbg.sinr ? parseFloat(dbg.sinr) : 0,
+      time: new Date()
+    });
+    if (signalHistory.length > 120) signalHistory.shift();
+    drawSignalChart();
 
     // Network
     if (data.network) {
-      document.getElementById('network-type').textContent = data.network.rat;
-      document.getElementById('operator-val').textContent = data.network.operator;
-    }
-
-    // Connection
-    if (data.connection) {
-      const c = data.connection;
-      document.getElementById('cellid-val').textContent = data.signal?.cell_id || '--';
-      document.getElementById('wanip-val').textContent = c.wan_ip;
-      document.getElementById('dns-val').textContent = c.primary_dns;
+      document.getElementById('network-type').textContent = rat;
+      document.getElementById('operator-val').textContent = data.network.operator || '--';
+      document.getElementById('cellid-val').textContent = dbg.enb_id || data.network.cell_id || '--';
+      document.getElementById('wanip-val').textContent = data.bearer?.wan_ip || dbg.ip || '--';
+      document.getElementById('dns-val').textContent = data.bearer?.dns || '--';
     }
 
     // Device
-    if (data.device) {
-      const d = data.device;
-      document.getElementById('device-name').textContent = d.device_name;
-      document.getElementById('imei-val').textContent = d.imei;
-      document.getElementById('mac-val').textContent = d.mac;
-      document.getElementById('device-ip').textContent = d.ip;
-      document.getElementById('firmware-val').textContent = d.software_version;
-      document.getElementById('webui-val').textContent = d.web_version;
+    if (data.modem) {
+      const m = data.modem;
+      document.getElementById('device-name').textContent = m.model || 'DW5821e';
+      document.getElementById('imei-val').textContent = m.imei || '--';
+      document.getElementById('mac-val').textContent = data.modem_type || 'Qualcomm X20';
+      document.getElementById('device-ip').textContent = m.state || '--';
+      document.getElementById('firmware-val').textContent = m.firmware || '--';
+      document.getElementById('webui-val').textContent = dbg.bandwidth ? dbg.bandwidth + ' MHz' : 'MBIM';
     }
 
-    // Data usage
-    if (data.data_usage) {
-      const du = data.data_usage;
-
-      // Calculate speed (bytes diff / interval)
-      if (prevRx > 0) {
-        const rxSpeed = (du.current_rx - prevRx) / (REFRESH_INTERVAL / 1000);
-        const txSpeed = (du.current_tx - prevTx) / (REFRESH_INTERVAL / 1000);
-        document.getElementById('rx-speed').textContent = formatBytes(rxSpeed) + '/s';
-        document.getElementById('tx-speed').textContent = formatBytes(txSpeed) + '/s';
-      }
-      prevRx = du.current_rx;
-      prevTx = du.current_tx;
-
-      document.getElementById('total-rx').textContent = formatBytes(du.total_rx);
-      document.getElementById('total-tx').textContent = formatBytes(du.total_tx);
-      document.getElementById('session-time').textContent = formatTime(du.total_duration);
-    }
+    // Signal quality panel
+    document.getElementById('rx-speed').textContent = dbg.sinr || '--';
+    document.getElementById('tx-speed').textContent = dbg.rsrq || '--';
+    document.getElementById('total-rx').textContent = sig.signal_quality + '%' || '--';
+    document.getElementById('total-tx').textContent = rat;
+    document.getElementById('session-time').textContent = dbg.rrc || data.modem?.power_state || '--';
 
     updateTime();
     addLog('Dashboard updated', 'ok');
   } catch (err) {
     addLog(`Fetch error: ${err.message}`, 'err');
   }
+}
+
+// === MODEM CONTROLS ===
+function setCtrlStatus(msg, type = 'info') {
+  const el = document.getElementById('ctrl-status');
+  const colors = { info: 'var(--text2)', ok: 'var(--green)', warn: 'var(--yellow)', err: 'var(--red)' };
+  el.style.color = colors[type] || colors.info;
+  el.textContent = msg;
+}
+
+async function rebootModem() {
+  if (!confirm('🔄 Reboot modem sekarang?\nKoneksi akan putus ~30 detik.')) return;
+
+  const btn = document.getElementById('btn-reboot');
+  btn.disabled = true;
+  btn.textContent = '⏳ REBOOTING...';
+  setCtrlStatus('⏳ Rebooting modem via AT+CFUN=1,1... (~30s)', 'warn');
+  addLog('Modem reboot initiated', 'warn');
+  document.getElementById('conn-status').textContent = 'REBOOTING';
+  document.getElementById('conn-status').className = 'connection-badge disconnected';
+
+  try {
+    const res = await fetch('/api/modem/reboot', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      setCtrlStatus('✅ ' + data.message + ' — Menunggu reconnect...', 'ok');
+      addLog('Modem reboot OK: ' + data.message, 'ok');
+      // Wait 30s then refresh (modem needs time)
+      setTimeout(() => {
+        setCtrlStatus('🔄 Refreshing dashboard...', 'warn');
+        fetchDashboard();
+      }, 30000);
+    } else {
+      setCtrlStatus('❌ Reboot failed: ' + (data.error || 'Unknown'), 'err');
+      addLog('Modem reboot failed: ' + data.error, 'err');
+    }
+  } catch (err) {
+    setCtrlStatus('❌ Error: ' + err.message, 'err');
+    addLog('Reboot error: ' + err.message, 'err');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔄 REBOOT';
+}
+
+async function disableModem() {
+  if (!confirm('⏸️ Disable modem?\nKoneksi akan terputus.')) return;
+
+  const btn = document.getElementById('btn-disable');
+  btn.disabled = true;
+  btn.textContent = '⏳ DISABLING...';
+  setCtrlStatus('Disabling modem...', 'warn');
+  addLog('Modem disable requested', 'warn');
+
+  try {
+    const res = await fetch('/api/modem/disable', { method: 'POST' });
+    const data = await res.json();
+    setCtrlStatus(data.success ? '✅ Modem disabled' : '❌ Failed', data.success ? 'ok' : 'err');
+    addLog(data.message || 'Modem disabled', 'ok');
+  } catch (err) {
+    setCtrlStatus('❌ Error: ' + err.message, 'err');
+    addLog('Disable error: ' + err.message, 'err');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '⏸️ DISABLE';
+}
+
+async function enableModem() {
+  const btn = document.getElementById('btn-enable');
+  btn.disabled = true;
+  btn.textContent = '⏳ ENABLING...';
+  setCtrlStatus('Enabling modem...', 'warn');
+  addLog('Modem enable requested', 'warn');
+
+  try {
+    const res = await fetch('/api/modem/enable', { method: 'POST' });
+    const data = await res.json();
+    setCtrlStatus(data.success ? '✅ Modem enabled' : '❌ Failed', data.success ? 'ok' : 'err');
+    addLog(data.message || 'Modem enabled', 'ok');
+    // Refresh after 5s
+    setTimeout(() => { fetchDashboard(); }, 5000);
+  } catch (err) {
+    setCtrlStatus('❌ Error: ' + err.message, 'err');
+    addLog('Enable error: ' + err.message, 'err');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '▶️ ENABLE';
 }
 
 // Init

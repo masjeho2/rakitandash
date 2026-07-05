@@ -11,7 +11,7 @@
   <header class="header">
     <div>
       <h1>📡 RAKITANDASH</h1>
-      <div class="subtitle">DW5820E Modem Dashboard v1.0</div>
+      <div class="subtitle">DW5821e Modem Dashboard v1.0</div>
     </div>
     <div class="status">
       <span id="conn-status" class="connection-badge disconnected">OFFLINE</span>
@@ -29,7 +29,7 @@
       <div style="display:flex;align-items:center;gap:20px;">
         <div>
           <div class="big-number" id="rsrp-val">--</div>
-          <div class="unit">RSRP (dBm)</div>
+          <div class="unit">SIGNAL QUALITY</div>
         </div>
         <div>
           <div class="signal-bars" id="signal-bars">
@@ -121,33 +121,44 @@
       </div>
     </div>
 
-    <!-- DATA USAGE -->
+    <!-- SIGNAL QUALITY -->
     <div class="card purple" id="card-data">
-      <div class="card-title">📊 DATA USAGE</div>
+      <div class="card-title">📊 SIGNAL QUALITY</div>
       <div style="display:flex;gap:20px;text-align:center">
         <div style="flex:1">
-          <div class="big-number" id="rx-speed">0</div>
-          <div class="unit">↓ Download</div>
+          <div class="big-number" id="rx-speed">--</div>
+          <div class="unit">Signal Quality</div>
         </div>
         <div style="flex:1">
-          <div class="big-number cyan" id="tx-speed">0</div>
-          <div class="unit">↑ Upload</div>
+          <div class="big-number cyan" id="tx-speed">--</div>
+          <div class="unit">Access Tech</div>
         </div>
       </div>
       <div style="margin-top:12px">
         <div class="stat-row">
-          <span class="stat-label">Total RX</span>
+          <span class="stat-label">Quality</span>
           <span class="stat-value green" id="total-rx">--</span>
         </div>
         <div class="stat-row">
-          <span class="stat-label">Total TX</span>
+          <span class="stat-label">Technology</span>
           <span class="stat-value yellow" id="total-tx">--</span>
         </div>
         <div class="stat-row">
-          <span class="stat-label">Session Time</span>
+          <span class="stat-label">Power State</span>
           <span class="stat-value cyan" id="session-time">--</span>
         </div>
       </div>
+    </div>
+
+    <!-- MODEM CONTROLS -->
+    <div class="card red" id="card-controls">
+      <div class="card-title">🎮 MODEM CONTROLS</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+        <button id="btn-reboot" class="ctrl-btn ctrl-red" onclick="rebootModem()">🔄 REBOOT</button>
+        <button id="btn-disable" class="ctrl-btn ctrl-yellow" onclick="disableModem()">⏸️ DISABLE</button>
+        <button id="btn-enable" class="ctrl-btn ctrl-green" onclick="enableModem()">▶️ ENABLE</button>
+      </div>
+      <div id="ctrl-status" style="margin-top:10px;font-size:14px;color:var(--text2)"></div>
     </div>
 
     <!-- SIGNAL HISTORY -->

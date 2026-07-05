@@ -270,3 +270,51 @@ canvas {
   .header h1 { font-size: 12px; }
   .big-number { font-size: 20px; }
 }
+
+/* Control Buttons */
+.ctrl-btn {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 10px;
+  padding: 10px 16px;
+  border: 2px solid;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg3);
+}
+
+.ctrl-btn:hover { transform: scale(1.05); }
+.ctrl-btn:active { transform: scale(0.95); }
+
+.ctrl-red {
+  color: var(--red);
+  border-color: var(--red);
+}
+.ctrl-red:hover {
+  background: rgba(255,51,51,0.2);
+  box-shadow: 0 0 10px var(--red);
+}
+
+.ctrl-yellow {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+.ctrl-yellow:hover {
+  background: rgba(255,215,0,0.2);
+  box-shadow: 0 0 10px var(--yellow);
+}
+
+.ctrl-green {
+  color: var(--green);
+  border-color: var(--green);
+}
+.ctrl-green:hover {
+  background: rgba(57,255,20,0.2);
+  box-shadow: 0 0 10px var(--green);
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}

@@ -28,9 +28,15 @@ app.get('/api/dashboard', async (req, res) => {
       try {
         db.prepare(`INSERT INTO signal_log (rssi, rsrp, rsrq, sinr, cell_id, pci, band, network_type, operator)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          data.signal.rssi, data.signal.rsrp, data.signal.rsrq,
-          data.signal.sinr, data.signal.cell_id, data.signal.pci,
-          data.signal.band, data.network?.rat || '', data.network?.operator || ''
+          data.signal.csq || 0,
+          data.signal.rsrp || 0,
+          data.signal.rsrq || 0,
+          data.signal.sinr || 0,
+          data.network?.cell_id || '0',
+          '0',
+          data.signal.rat || '0',
+          data.signal.rat || '',
+          data.network?.operator || ''
         );
       } catch (e) { /* ignore log errors */ }
     }
@@ -94,11 +100,47 @@ app.get('/api/connection', async (req, res) => {
   res.json(status || { error: 'Modem unreachable' });
 });
 
-// POST /api/login — manual login
+// POST /api/login — detect modem
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  const ok = await modem.login(username, password);
-  res.json({ success: ok });
+  const port = await modem.detectModem();
+  res.json({ success: !!port, port });
+});
+
+// POST /api/modem/reboot — reboot modem
+app.post('/api/modem/reboot', async (req, res) => {
+  console.log('[RAKITANDASH] Modem reboot requested!');
+  const result = await modem.reboot();
+  res.json(result);
+});
+
+// POST /api/modem/disable — disable modem via AT
+app.post('/api/modem/disable', async (req, res) => {
+  const result = await modem.disableRadio();
+  res.json(result);
+});
+
+// POST /api/modem/enable — enable modem via AT
+app.post('/api/modem/enable', async (req, res) => {
+  const result = await modem.enableRadio();
+  res.json(result);
+});
+
+// POST /api/modem/ca/enable — enable Carrier Aggregation
+app.post('/api/modem/ca/enable', async (req, res) => {
+  const result = await modem.enableCA();
+  res.json(result);
+});
+
+// POST /api/modem/ca/disable — disable Carrier Aggregation
+app.post('/api/modem/ca/disable', async (req, res) => {
+  const result = await modem.disableCA();
+  res.json(result);
+});
+
+// GET /api/modem/ca/info — get CA info
+app.get('/api/modem/ca/info', async (req, res) => {
+  const result = await modem.getCAInfo();
+  res.json(result || { error: 'No CA info' });
 });
 
 // GET /api/settings
@@ -129,16 +171,17 @@ app.listen(PORT, HOST, async () => {
   console.log(`
 ╔══════════════════════════════════════════════╗
 ║          RAKITANDASH v1.0.0                  ║
-║   DW5820E Modem Management Dashboard        ║
+║   DW5821e Modem Management Dashboard        ║
 ║   http://${HOST}:${PORT}                       ║
 ╚══════════════════════════════════════════════╝
   `);
 
-  // Auto-login
-  const ok = await modem.login();
-  if (ok) {
-    console.log('[RAKITANDASH] Modem login OK');
+  // Auto-detect modem serial port
+  const port = await modem.detectModem();
+  if (port) {
+    console.log(`[RAKITANDASH] Modem detected: ${port}`);
   } else {
-    console.log('[RAKITANDASH] Modem login failed — check IP/user/pass in .env');
+    console.log('[RAKITANDASH] No modem serial port found (/dev/ttyUSB*)');
+    console.log('[RAKITANDASH] Connect DW5821e modem via USB');
   }
 });
