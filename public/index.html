@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RakitanDash — DW5820E Modem Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- HEADER -->
+  <header class="header">
+    <div>
+      <h1>📡 RAKITANDASH</h1>
+      <div class="subtitle">DW5820E Modem Dashboard v1.0</div>
+    </div>
+    <div class="status">
+      <span id="conn-status" class="connection-badge disconnected">OFFLINE</span>
+      <span id="status-dot" class="status-dot"></span>
+      <span id="update-time" style="color:var(--text2);font-size:14px">--:--:--</span>
+    </div>
+  </header>
+
+  <!-- DASHBOARD -->
+  <div class="dashboard">
+
+    <!-- SIGNAL -->
+    <div class="card green" id="card-signal">
+      <div class="card-title">📶 SIGNAL STRENGTH</div>
+      <div style="display:flex;align-items:center;gap:20px;">
+        <div>
+          <div class="big-number" id="rsrp-val">--</div>
+          <div class="unit">RSRP (dBm)</div>
+        </div>
+        <div>
+          <div class="signal-bars" id="signal-bars">
+            <div class="signal-bar" style="height:10px"></div>
+            <div class="signal-bar" style="height:18px"></div>
+            <div class="signal-bar" style="height:26px"></div>
+            <div class="signal-bar" style="height:34px"></div>
+            <div class="signal-bar" style="height:40px"></div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="stat-row">
+          <span class="stat-label">RSSI</span>
+          <span class="stat-value cyan" id="rssi-val">-- dBm</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">RSRQ</span>
+          <span class="stat-value yellow" id="rsrq-val">-- dB</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">SINR</span>
+          <span class="stat-value green" id="sinr-val">-- dB</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">PCI</span>
+          <span class="stat-value cyan" id="pci-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Band</span>
+          <span class="stat-value yellow" id="band-val">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- NETWORK -->
+    <div class="card cyan" id="card-network">
+      <div class="card-title">🌐 NETWORK</div>
+      <div class="big-number cyan" id="network-type">--</div>
+      <div class="unit" style="text-align:center">Network Type</div>
+      <div style="margin-top:12px">
+        <div class="stat-row">
+          <span class="stat-label">Operator</span>
+          <span class="stat-value green" id="operator-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Cell ID</span>
+          <span class="stat-value yellow" id="cellid-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">WAN IP</span>
+          <span class="stat-value cyan" id="wanip-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">DNS</span>
+          <span class="stat-value green" id="dns-val">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEVICE -->
+    <div class="card yellow" id="card-device">
+      <div class="card-title">📱 DEVICE INFO</div>
+      <div style="margin-top:4px">
+        <div class="stat-row">
+          <span class="stat-label">Device</span>
+          <span class="stat-value green" id="device-name">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">IMEI</span>
+          <span class="stat-value yellow" id="imei-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">MAC</span>
+          <span class="stat-value cyan" id="mac-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">IP</span>
+          <span class="stat-value green" id="device-ip">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Firmware</span>
+          <span class="stat-value orange" id="firmware-val">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Web UI</span>
+          <span class="stat-value cyan" id="webui-val">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- DATA USAGE -->
+    <div class="card purple" id="card-data">
+      <div class="card-title">📊 DATA USAGE</div>
+      <div style="display:flex;gap:20px;text-align:center">
+        <div style="flex:1">
+          <div class="big-number" id="rx-speed">0</div>
+          <div class="unit">↓ Download</div>
+        </div>
+        <div style="flex:1">
+          <div class="big-number cyan" id="tx-speed">0</div>
+          <div class="unit">↑ Upload</div>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="stat-row">
+          <span class="stat-label">Total RX</span>
+          <span class="stat-value green" id="total-rx">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Total TX</span>
+          <span class="stat-value yellow" id="total-tx">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Session Time</span>
+          <span class="stat-value cyan" id="session-time">--</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIGNAL HISTORY -->
+    <div class="card green" id="card-history" style="grid-column: 1 / -1;">
+      <div class="card-title">📈 SIGNAL HISTORY</div>
+      <canvas id="signal-chart"></canvas>
+    </div>
+
+    <!-- ACTIVITY LOG -->
+    <div class="card cyan" id="card-log" style="grid-column: 1 / -1;">
+      <div class="card-title">📋 ACTIVITY LOG</div>
+      <div id="activity-log" style="max-height:150px;overflow-y:auto;font-size:14px;color:var(--text2);">
+        <div style="padding:4px 0">[INIT] RakitanDash starting...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "rakitandash",
+  "version": "1.0.0",
+  "description": "RakitanDash - DW5820E Modem Management Dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "author": "masjeho2",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "better-sqlite3": "^11.0.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0",
+    "xml2js": "^0.6.0"
+  }
+}
